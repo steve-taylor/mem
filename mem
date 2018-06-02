@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+
+export M2_DIR=".m2"
+export M2_ABSOLUTE_DIR="${HOME}/${M2_DIR}"
+
+SCRIPT_NAME="mem"
+INIT_COMMAND="init"
+CREATE_COMMAND="create"
+SWITCH_COMMAND="use"
+DELETE_COMMAND="delete"
+HELP_COMMAND="help"
+
+echoerr() {
+    cat <<< "$@" 1>&2;
+}
+
+show_help() {
+    echo "Usage:"
+    echo ""
+    echo "  * Show all Maven environments:"
+    echo "      ${SCRIPT_NAME}"
+    echo ""
+    echo "  * Start using ${SCRIPT_NAME} to manage Maven environments:"
+    echo "      ${SCRIPT_NAME} ${INIT_COMMAND}"
+    echo ""
+    echo "  * Switch to an existing Maven environment:"
+    echo "      ${SCRIPT_NAME} ${SWITCH_COMMAND} <environment>"
+    echo ""
+    echo "  * Create and switch to a new Maven environment:"
+    echo "      ${SCRIPT_NAME} ${CREATE_COMMAND} <environment>"
+    echo ""
+    echo "  * Delete a Maven environment:"
+    echo "      ${SCRIPT_NAME} ${DELETE_COMMAND} <environment>"
+    echo ""
+}
+
+init_with_environment() {
+    # Ensure Maven home exists
+    mkdir -p "${M2_ABSOLUTE_DIR}"
+
+    # Move Maven home to an environment directory
+    mv "${M2_ABSOLUTE_DIR}" "${M2_ABSOLUTE_DIR}.${1}"
+    echo "Congratulations! You are now using ${SCRIPT_NAME} to manage your Maven environments."
+    echo "Created Maven environment '${1}'"
+}
+
+create_environment() {
+    mkdir -p "${M2_ABSOLUTE_DIR}.${1}"
+    echo "Created Maven environment '${1}'"
+}
+
+delete_environment() {
+    rm -rf "${M2_ABSOLUTE_DIR}.${1}"
+    echo "Deleted environment '${1}'"
+}
+
+switch_environment() {
+    rm -f "${M2_ABSOLUTE_DIR}"
+    ln -sf "${M2_ABSOLUTE_DIR}.${1}" "${M2_ABSOLUTE_DIR}"
+    echo "Now using Maven environment '${1}'"
+}
+
+ensure_init_required() {
+    if [ -L "${M2_ABSOLUTE_DIR}" ]; then
+        echoerr "It looks like you are already managing Maven environments with SCRIPT_NAME."
+        exit 1
+    fi
+}
+
+ensure_init_not_required() {
+    if [ ! -L "${M2_ABSOLUTE_DIR}" ]; then
+        echoerr "You have not initialized ${SCRIPT_NAME}."
+        echoerr "Use 'mem ${INIT_COMMAND}' to start managing Maven environments."
+        exit 1
+    fi
+}
+
+ensure_environment_not_file() {
+    if [ -f "${M2_ABSOLUTE_DIR}.${1}" ]; then
+        echoerr "Cannot create environmnent '${1}'. A file with the path ${M2_ABSOLUTE_DIR}.${1} already exists."
+        exit 1
+    fi
+}
+
+ensure_environment_does_not_exist() {
+    if [ -d "${M2_ABSOLUTE_DIR}.${1}" ]; then
+        echoerr "The environment '${1}' already exists!"
+        exit 1
+    fi
+}
+
+ensure_environment_exists() {
+    if [ ! -d "${M2_ABSOLUTE_DIR}.${1}" ]; then
+        echoerr "The environment '${1}' does not exist!"
+        exit 1
+    fi
+}
+
+ensure_environment_not_active() {
+    if [ "${M2_ABSOLUTE_DIR}.${1}" == "$(readlink "${M2_ABSOLUTE_DIR}")" ]; then
+        echoerr "Cannot delete environment '${1}' because it is the active environment."
+        echoerr "Switch to another environment first."
+        exit 1
+    fi
+}
+
+# <cmd> init
+# Use for the first time - migrate existing Maven home to a new environment
+if [ "${1}" == "${INIT_COMMAND}" ] && [ $# -eq 1 ]; then
+    ensure_init_required
+    ensure_environment_not_file "default"
+    ensure_environment_does_not_exist "default"
+    init_with_environment "default"
+    switch_environment "default"
+    exit 0
+fi
+
+# <cmd> create <environment>
+# Create a new environment and switch to it
+if [ "${1}" == "${CREATE_COMMAND}" ] && [ $# -eq 2 ]; then
+    ensure_init_not_required
+    ensure_environment_not_file "${2}"
+    ensure_environment_does_not_exist "${2}"
+    create_environment "${2}"
+    switch_environment "${2}"
+    exit 0
+fi
+
+# <cmd> use <environment>
+# Switch to an existing environment
+if [ "${1}" == "${SWITCH_COMMAND}" ] && [ $# -eq 2 ]; then
+    ensure_init_not_required
+    ensure_environment_exists "${2}"
+    switch_environment "${2}"
+    exit 0
+fi
+
+# <cmd> delete <environment>
+# Delete an environment
+if [ "${1}" == "${DELETE_COMMAND}" ] && [ $# -eq 2 ]; then
+    ensure_init_not_required
+    ensure_environment_exists "${2}"
+    ensure_environment_not_active "${2}"
+    delete_environment "${2}"
+    exit 0
+fi
+
+# <cmd> help
+# Show help
+if [ "${1}" == "${HELP_COMMAND}" ] && [ $# -eq 1 ]; then
+    show_help
+    exit 0
+fi
+
+# <cmd>
+# List current environments
+if [ $# -eq 0 ]; then
+    ensure_init_not_required
+    echo "Maven environments:"
+    echo ""
+    ls -a -1 "${M2_ABSOLUTE_DIR}/.." | grep "${M2_DIR}" | cut -c $(expr $(echo "${#M2_DIR} + 2"))- | xargs -L1 -I {} bash -c 'if [ "${M2_ABSOLUTE_DIR}.{}" == "$(readlink "${M2_ABSOLUTE_DIR}")" ]; then echo " * {} [active]"; else echo " * {}"; fi'
+    echo ""
+    exit 0
+fi
+
+# :'(
+echoerr "Unrecognized command line options. Use the following command for help:"
+echoerr ""
+echoerr "    ${SCRIPT_NAME} ${HELP_COMMAND}"
+echoerr ""
